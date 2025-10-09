@@ -344,24 +344,49 @@ func (ni *NodeInfo) fractionTaskGpusAllocatableDeviceCount(pod *pod_info.PodInfo
 }
 
 func (ni *NodeInfo) IsTaskFitOnGpuGroup(resourceRequest *resource_info.ResourceRequirements, gpuGroup string) bool {
-	return ni.UsedSharedGPUsMemory[gpuGroup] != 0 &&
-		ni.enoughResourcesOnGpu(resourceRequest, gpuGroup) &&
-		!ni.isAllGpuReleased(gpuGroup)
+	usedMemory := ni.UsedSharedGPUsMemory[gpuGroup]
+	hasEnoughResources := ni.enoughResourcesOnGpu(resourceRequest, gpuGroup)
+	isAllReleased := ni.isAllGpuReleased(gpuGroup)
+	fits := usedMemory != 0 && hasEnoughResources && !isAllReleased
+
+	log.InfraLogger.V(4).Infof("[GPU_FIT_CHECK] GPU <%s>: UsedMemory!=0: <%v>, EnoughResources: <%v>, AllReleased: <%v> -> Fits: <%v>",
+		gpuGroup, usedMemory != 0, hasEnoughResources, isAllReleased, fits)
+
+	return fits
 }
 
 func (ni *NodeInfo) EnoughIdleResourcesOnGpu(resources *resource_info.ResourceRequirements, gpuGroup string) bool {
-	if _, foundOnAllocated := ni.AllocatedSharedGPUsMemory[gpuGroup]; !foundOnAllocated {
+	allocatedMemory, foundOnAllocated := ni.AllocatedSharedGPUsMemory[gpuGroup]
+	if !foundOnAllocated {
+		log.InfraLogger.V(4).Infof("[IDLE_CHECK] GPU <%s>: Not found in AllocatedSharedGPUsMemory (pipelined) -> false",
+			gpuGroup)
 		// If a gpu group is not found in allocated, it's an indication that this group is pipelined
 		return false
 	}
-	return ni.MemoryOfEveryGpuOnNode-ni.AllocatedSharedGPUsMemory[gpuGroup]-ni.GetResourceGpuMemory(resources) >= 0
+	requestedMemory := ni.GetResourceGpuMemory(resources)
+	availableMemory := ni.MemoryOfEveryGpuOnNode - allocatedMemory
+	hasEnough := availableMemory-requestedMemory >= 0
+
+	log.InfraLogger.V(4).Infof("[IDLE_CHECK] GPU <%s>: TotalMemory=<%d MB>, AllocatedMemory=<%d MB>, RequestedMemory=<%d MB>, AvailableMemory=<%d MB>, EnoughIdle=<%v>",
+		gpuGroup, ni.MemoryOfEveryGpuOnNode, allocatedMemory, requestedMemory, availableMemory, hasEnough)
+
+	return hasEnough
 }
 
 func (ni *NodeInfo) enoughResourcesOnGpu(resources *resource_info.ResourceRequirements, gpuGroup string) bool {
-	return (ni.MemoryOfEveryGpuOnNode -
-		ni.AllocatedSharedGPUsMemory[gpuGroup] +
-		ni.ReleasingSharedGPUsMemory[gpuGroup] -
-		ni.GetResourceGpuMemory(resources)) >= 0
+	totalMemory := ni.MemoryOfEveryGpuOnNode
+	allocatedMemory := ni.AllocatedSharedGPUsMemory[gpuGroup]
+	releasingMemory := ni.ReleasingSharedGPUsMemory[gpuGroup]
+	requestedMemory := ni.GetResourceGpuMemory(resources)
+
+	// Available = Total - Allocated + Releasing (because releasing memory will become available)
+	availableMemory := totalMemory - allocatedMemory + releasingMemory
+	hasEnough := (availableMemory - requestedMemory) >= 0
+
+	log.InfraLogger.V(4).Infof("[RESOURCE_CHECK] GPU <%s>: TotalMemory=<%d MB>, AllocatedMemory=<%d MB>, ReleasingMemory=<%d MB>, RequestedMemory=<%d MB>, AvailableMemory=<%d MB>, EnoughResources=<%v>",
+		gpuGroup, totalMemory, allocatedMemory, releasingMemory, requestedMemory, availableMemory, hasEnough)
+
+	return hasEnough
 }
 
 func (ni *NodeInfo) isAllGpuReleased(gpuGroup string) bool {
