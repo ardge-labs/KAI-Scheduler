@@ -124,6 +124,22 @@ func NewNodeInfo(node *v1.Node, podAffinityInfo pod_affinity.NodePodAffinityInfo
 			node.Name, capacity.DetailedString(), nodeInfo.Allocatable.DetailedString())
 	}
 
+	// FIX: Detect GPU time-slicing and adjust idle GPU count to physical GPU count
+	// With time-slicing, node.Allocatable.GPUs() reports the time-sliced device count (e.g., 100),
+	// but all devices share the same physical GPU(s) VRAM. We must use the physical GPU count
+	// for proper VRAM accounting.
+	physicalGPUCount := nodeInfo.GetNumberOfGPUsInNode() // From nvidia.com/gpu.count label
+	allocatableGPUCount := int64(nodeInfo.Allocatable.GPUs())
+
+	if allocatableGPUCount > physicalGPUCount && physicalGPUCount > 0 {
+		// Time-slicing detected: allocatable > physical
+		log.InfraLogger.V(2).Infof(
+			"Node <%s>: GPU time-slicing detected (allocatable=%d devices, physical=%d GPUs). "+
+				"Adjusting idle GPU count to physical count for VRAM accounting.",
+			node.Name, allocatableGPUCount, physicalGPUCount)
+		nodeInfo.Idle.SetGPUs(float64(physicalGPUCount))
+	}
+
 	return nodeInfo
 }
 
