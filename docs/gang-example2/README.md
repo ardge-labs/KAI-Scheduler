@@ -397,12 +397,55 @@ kubectl describe podgroup app-with-models
 # Look for unschedulableExplanation field
 ```
 
-### One Pod Fails to Start
+### One Pod Fails to Start or Gets Deleted
 
-If one pod fails after scheduling:
-- Other pods will continue running (gang scheduling ensures scheduling, not runtime)
-- Consider adding readiness probes for runtime dependencies
-- Use init containers for startup dependencies
+**Scenario 1: Pod fails during startup**
+- Gang scheduling ensures all pods are **scheduled together**, not that they run successfully
+- If a pod crashes or fails after being scheduled, other pods continue running
+- Consider adding readiness probes and init containers for runtime dependencies
+
+**Scenario 2: Pod is manually deleted (Stale Gang Eviction)**
+⚠️ **Important**: If you manually delete one pod from a gang, all other pods will be automatically evicted!
+
+**What happens:**
+1. You delete a pod (e.g., `model-1`)
+2. The PodGroup now has fewer active pods than `minMember` requires
+3. The PodGroup becomes **"stale"** (gang requirement not satisfied)
+4. After a grace period (default: configurable in scheduler), all remaining pods are evicted
+5. The PodGroup remains, but all pods are deleted
+
+**How to detect stale gang eviction:**
+
+```bash
+# Check events for StaleJob and Killing reasons
+kubectl get events --sort-by='.lastTimestamp' | grep -E "Killing|StaleJob"
+
+# Example output:
+# 15m  Normal   Killing    pod/model-1      Stopping container model
+# 14m  Normal   StaleJob   podgroup/app     Job is stale. 2 pods are active, minMember is 3
+# 13m  Normal   Killing    pod/app-server   Stopping container app
+# 13m  Normal   Killing    pod/model-2      Stopping container model
+```
+
+**Check scheduler logs:**
+```bash
+kubectl logs -n kai-scheduler -l app=scheduler | grep -i "stale\|evict"
+
+# Example output:
+# Evicted task: <default/app-server> due its job being a stale job, its status: <Running>
+# Evicted task: <default/model-2> due its job being a stale job, its status: <Running>
+```
+
+**Why this policy exists:**
+- Enforces "all-in or all-out" consistency for gang-scheduled workloads
+- Prevents partial deployments from consuming resources indefinitely
+- Ensures the application doesn't run in a degraded state with missing components
+
+**To restart the gang:**
+```bash
+# The PodGroup still exists, so just recreate the pods
+kubectl apply -f app-with-models.yaml
+```
 
 ### Wrong GPU Memory Allocation
 
