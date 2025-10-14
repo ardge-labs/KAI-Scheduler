@@ -1,0 +1,139 @@
+# Three Deployments Sharing One PodGroup
+#
+# This example shows how to gang-schedule pods from different Deployments.
+# Use case: Each component (app, model-1, model-2) needs independent scaling
+# but initial deployment must be atomic (all start together).
+#
+# Key points:
+# 1. Manually create a shared PodGroup
+# 2. Each Deployment's pods must have kai.scheduler/podgroup label
+# 3. Set minMember to total desired pods across all Deployments
+#
+# Limitation: This works for INITIAL deployment. If you later scale up/down
+# individual Deployments, the PodGroup minMember becomes stale.
+# For dynamic scaling, consider using a single Deployment with multiple containers.
+#
+---
+apiVersion: scheduling.kai.run/v1alpha2
+kind: PodGroup
+metadata:
+  name: shared-app-podgroup
+  namespace: default
+spec:
+  minMember: 3                    # 1 app + 1 model-1 + 1 model-2 = 3 pods
+  queue: default
+  priorityClassName: Inference
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-server
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app-server
+  template:
+    metadata:
+      labels:
+        app: app-server
+        kai.scheduler/podgroup: shared-app-podgroup  # Links to shared PodGroup
+        role: application
+      annotations:
+        gpu-memory: "4000"
+    spec:
+      schedulerName: kai-scheduler
+      restartPolicy: Always
+      containers:
+      - name: app
+        image: nginx:latest
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "Application server starting..."
+            echo "Connected to shared-app-podgroup"
+            sleep infinity
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+          limits:
+            nvidia.com/gpu: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-1
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: model-1
+  template:
+    metadata:
+      labels:
+        app: model-1
+        kai.scheduler/podgroup: shared-app-podgroup  # Same PodGroup
+        role: model
+      annotations:
+        gpu-memory: "8000"
+    spec:
+      schedulerName: kai-scheduler
+      restartPolicy: Always
+      containers:
+      - name: model
+        image: pytorch/pytorch:latest
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "Model 1 loading..."
+            python -c "import torch; print(f'Model 1 ready, GPU available: {torch.cuda.is_available()}')"
+            sleep infinity
+        ports:
+        - containerPort: 5000
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+          limits:
+            nvidia.com/gpu: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-2
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: model-2
+  template:
+    metadata:
+      labels:
+        app: model-2
+        kai.scheduler/podgroup: shared-app-podgroup  # Same PodGroup
+        role: model
+      annotations:
+        gpu-memory: "8000"
+    spec:
+      schedulerName: kai-scheduler
+      restartPolicy: Always
+      containers:
+      - name: model
+        image: pytorch/pytorch:latest
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "Model 2 loading..."
+            python -c "import torch; print(f'Model 2 ready, GPU available: {torch.cuda.is_available()}')"
+            sleep infinity
+        ports:
+        - containerPort: 5001
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+          limits:
+            nvidia.com/gpu: 1

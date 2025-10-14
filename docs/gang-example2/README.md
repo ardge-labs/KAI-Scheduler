@@ -201,6 +201,137 @@ containers:
     value: "/models/model.pt"
 ```
 
+## Using Deployments Instead of Pods
+
+If you need independent scaling or lifecycle management for each component, you can use separate Deployments that share a single PodGroup. See `deployments-shared-podgroup.yaml` for a complete example.
+
+### How It Works
+
+```yaml
+# 1. Create a shared PodGroup
+apiVersion: scheduling.kai.run/v1alpha2
+kind: PodGroup
+metadata:
+  name: shared-app-podgroup
+spec:
+  minMember: 3  # Total pods across all Deployments
+
+# 2. Each Deployment references the same PodGroup
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-server
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        kai.scheduler/podgroup: shared-app-podgroup  # Link to shared PodGroup
+```
+
+### Setup Steps
+
+1. **Manually create a shared PodGroup** with `minMember` set to total initial pod count
+2. **Add the `kai.scheduler/podgroup: <name>` label** to each Deployment's pod template
+3. **Deploy all Deployments** - their pods will be gang-scheduled together
+
+### Example Deployment
+
+```bash
+# Apply the Deployment-based example
+kubectl apply -f deployments-shared-podgroup.yaml
+
+# Verify all pods start together
+kubectl get pods -l kai.scheduler/podgroup=shared-app-podgroup -w
+```
+
+### Important Limitations
+
+⚠️ **Gang scheduling works for INITIAL deployment only**
+
+**What happens with scaling:**
+
+```bash
+# Initial state: 3 Deployments, 1 replica each = 3 pods (gang-scheduled ✓)
+kubectl get deployment
+# app-server   1/1     1            1
+# model-1      1/1     1            1
+# model-2      1/1     1            1
+
+# Scale up model-1
+kubectl scale deployment model-1 --replicas=2
+
+# Result: 4th pod schedules INDEPENDENTLY (NOT gang-scheduled)
+# - PodGroup still says minMember: 3
+# - New model-1 pod doesn't wait for others
+# - Gang scheduling contract is broken
+```
+
+**Why this happens:**
+- PodGroup `minMember` is static (set at creation time)
+- Kubernetes doesn't automatically update PodGroup when Deployments scale
+- The pod-grouper doesn't reconcile PodGroup changes for manual PodGroups
+
+### When to Use This Pattern
+
+✅ **Good Use Cases:**
+- **Initial atomic deployment** of microservices that must start together
+- **Static configurations** where replica counts don't change after deployment
+- **Independent lifecycle management** (restart one component without affecting others)
+- **Separate update strategies** for different components
+
+❌ **Not Recommended For:**
+- **Dynamic scaling scenarios** where replicas change frequently
+- **Auto-scaling** with HPA (Horizontal Pod Autoscaler)
+- **Rolling updates** that change total pod count
+- **Development environments** with frequent scale up/down
+
+### Alternatives for Dynamic Scaling
+
+If you need gang scheduling AND dynamic scaling, consider:
+
+**Option 1: Single Deployment with Multiple Containers**
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  replicas: 1  # Scale the entire pod group together
+  template:
+    spec:
+      containers:
+      - name: app
+      - name: model-1
+      - name: model-2
+```
+**Pros**: Scales atomically, gang scheduling always respected
+**Cons**: All containers restart together, shared resource limits
+
+**Option 2: StatefulSet with Predictable Scaling**
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+spec:
+  replicas: 3
+  # Pod 0: app-server
+  # Pod 1: model-1
+  # Pod 2: model-2
+```
+**Pros**: Predictable pod names, ordered scaling
+**Cons**: Complex configuration, may need custom logic
+
+**Option 3: External Controller**
+- Build a custom controller that watches Deployments
+- Automatically updates PodGroup `minMember` when replicas change
+- Most flexible but requires development effort
+
+### Best Practice Recommendation
+
+For production deployments with gang scheduling requirements:
+
+1. **If scaling is needed**: Use a single Deployment with multiple containers
+2. **If independent lifecycle is crucial**: Accept the initial-deployment-only limitation
+3. **If both are required**: Implement an external controller or use a service mesh with startup dependencies
+
 ## Troubleshooting
 
 ### Pods Stuck in Pending
