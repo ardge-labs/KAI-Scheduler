@@ -36,19 +36,24 @@ Gang scheduling solves this by ensuring all components start simultaneously.
 
 ### 1. PodGroup
 - **minMember**: 3 (all pods must be scheduled together)
-- **priorityClassName**: Inference (appropriate for serving workloads)
-- **queue**: default
+- **priorityClassName**: inference (must match existing PriorityClass, case-sensitive)
+- **queue**: test
 
 ### 2. Application Server Pod
 - **Name**: `app-server`
 - **Role**: Main application handling user requests
-- **GPU Memory**: 4GB
+- **GPU Memory**: 4GB (via `gpu-memory` annotation)
+- **Required annotations**:
+  - `pod-group-name: app-with-models` (links to manual PodGroup)
+  - `gpu-memory: "4000"` (VRAM request in MB)
+- **Required label**: `kai.scheduler/podgroup: app-with-models` (for scheduler filtering)
 - **Behavior**: Waits for model pods to be ready before serving
 
 ### 3. Model Serving Pods
 - **model-1**: First ML model (8GB VRAM)
 - **model-2**: Second ML model (8GB VRAM)
 - **Purpose**: Provide inference capabilities to the application
+- **Same requirements**: Must have both `pod-group-name` annotation and `kai.scheduler/podgroup` label
 
 ## How to Use
 
@@ -209,7 +214,7 @@ If you need independent scaling or lifecycle management for each component, you 
 
 ```yaml
 # 1. Create a shared PodGroup
-apiVersion: scheduling.kai.run/v1alpha2
+apiVersion: scheduling.run.ai/v2alpha2
 kind: PodGroup
 metadata:
   name: shared-app-podgroup
@@ -334,6 +339,55 @@ For production deployments with gang scheduling requirements:
 
 ## Troubleshooting
 
+### Critical: Manual PodGroup with Standalone Pods
+
+⚠️ **When using standalone Pods (not Deployments/Jobs) with a manual PodGroup, you MUST include the `pod-group-name` annotation on each pod.**
+
+**Problem**: Without this annotation, the KAI scheduler's admission webhook will auto-generate a separate PodGroup for each pod, ignoring your manual PodGroup.
+
+**Symptoms**:
+- Multiple PodGroups appear instead of just your manual one (e.g., `pg-app-server-*`, `pg-model-1-*`)
+- Pods remain in `Pending` state
+- PodGroup has no `status` field (never processed by scheduler)
+- Events show `PodGrouperWarning: Pod "xxx" not found`
+
+**Solution**: Add `pod-group-name` annotation to link pods to your manual PodGroup:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-server
+  labels:
+    kai.scheduler/podgroup: app-with-models  # For scheduler filtering
+  annotations:
+    pod-group-name: app-with-models  # ⚠️ REQUIRED for manual PodGroup
+    gpu-memory: "4000"
+spec:
+  schedulerName: kai-scheduler
+  # ...
+```
+
+**Requirements Summary**:
+
+| Workload Type | `kai.scheduler/podgroup` label | `pod-group-name` annotation | Why |
+|---------------|-------------------------------|----------------------------|-----|
+| **Standalone Pod** | ✅ Required | ✅ Required | No ownerReference - pod-grouper auto-creates PodGroup |
+| **Deployment** | ✅ Required | ❌ Not needed | Has ownerReference - pod-grouper uses Deployment |
+| **Job/CronJob** | ✅ Required | ❌ Not needed | Has ownerReference - pod-grouper uses Job |
+
+**Key Points**:
+- The `kai.scheduler/podgroup` **label** is always required for the scheduler to link pods to the PodGroup
+- The `pod-group-name` **annotation** is only required for standalone pods to prevent auto-creation of individual PodGroups
+- For Deployments/Jobs: The pod-grouper uses the ownerReference chain, so the annotation is not necessary
+
+**Why This Happens**:
+1. The pod-grouper automatically creates a PodGroup for any pod without an ownerReference (Deployment/Job)
+2. This happens **before** the scheduler processes the pod's label
+3. The admission webhook sets `pod-group-name` annotation based on the auto-created PodGroup
+4. The scheduler uses the annotation (not the label) to link pods to PodGroups
+5. Result: Your manual PodGroup is ignored
+
 ### Pods Stuck in Pending
 
 ```bash
@@ -359,3 +413,38 @@ kubectl exec -it model-1 -- nvidia-smi
 # Verify annotation matches actual usage
 kubectl get pod model-1 -o yaml | grep gpu-memory
 ```
+
+### Error: "cannot request both GPU and GPU memory"
+
+**Problem**: The admission webhook rejects pods that have both `nvidia.com/gpu` resource requests AND `gpu-memory` annotation.
+
+**Solution**: Choose ONE of these scheduling modes:
+
+**Option 1: VRAM-based scheduling** (recommended for GPU sharing):
+```yaml
+metadata:
+  annotations:
+    gpu-memory: "8000"  # Request 8GB VRAM
+spec:
+  containers:
+  - name: app
+    # NO resources.requests.nvidia.com/gpu here
+```
+
+**Option 2: Whole GPU scheduling**:
+```yaml
+spec:
+  containers:
+  - name: app
+    resources:
+      requests:
+        nvidia.com/gpu: 1
+      limits:
+        nvidia.com/gpu: 1
+    # NO gpu-memory annotation on pod
+```
+
+**Key Difference**:
+- `gpu-memory` annotation: Enables VRAM-based GPU sharing (multiple pods per GPU)
+- `nvidia.com/gpu` resource: Requests whole GPU devices (one pod per GPU)
+- **Cannot use both** - the scheduler will reject the pod

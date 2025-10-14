@@ -11,15 +11,15 @@
 # - If resources for all 3 aren't available, none will start
 #
 ---
-apiVersion: scheduling.kai.run/v1alpha2
+apiVersion: scheduling.run.ai/v2alpha2
 kind: PodGroup
 metadata:
   name: app-with-models
   namespace: default
 spec:
   minMember: 3                    # All 3 pods must be scheduled together
-  queue: default
-  priorityClassName: Inference    # Inference workload priority
+  queue: test
+  priorityClassName: inference    # Inference workload priority (lowercase)
 ---
 apiVersion: v1
 kind: Pod
@@ -29,7 +29,9 @@ metadata:
   labels:
     kai.scheduler/podgroup: app-with-models
     role: application
+    app: awm
   annotations:
+    pod-group-name: app-with-models  # Link to manual PodGroup
     gpu-memory: "4000"  # 4GB for lightweight inference
 spec:
   schedulerName: kai-scheduler
@@ -46,11 +48,6 @@ spec:
         sleep infinity
     ports:
     - containerPort: 8080
-    resources:
-      requests:
-        nvidia.com/gpu: 1
-      limits:
-        nvidia.com/gpu: 1
 ---
 apiVersion: v1
 kind: Pod
@@ -60,7 +57,9 @@ metadata:
   labels:
     kai.scheduler/podgroup: app-with-models
     role: model
+    app: awm
   annotations:
+    pod-group-name: app-with-models  # Link to manual PodGroup
     gpu-memory: "8000"  # 8GB for first model
 spec:
   schedulerName: kai-scheduler
@@ -76,11 +75,6 @@ spec:
         sleep infinity
     ports:
     - containerPort: 5000
-    resources:
-      requests:
-        nvidia.com/gpu: 1
-      limits:
-        nvidia.com/gpu: 1
 ---
 apiVersion: v1
 kind: Pod
@@ -90,7 +84,9 @@ metadata:
   labels:
     kai.scheduler/podgroup: app-with-models
     role: model
+    app: awm
   annotations:
+    pod-group-name: app-with-models  # Link to manual PodGroup
     gpu-memory: "8000"  # 8GB for second model
 spec:
   schedulerName: kai-scheduler
@@ -106,8 +102,3 @@ spec:
         sleep infinity
     ports:
     - containerPort: 5001
-    resources:
-      requests:
-        nvidia.com/gpu: 1
-      limits:
-        nvidia.com/gpu: 1
