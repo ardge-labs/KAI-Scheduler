@@ -1,0 +1,88 @@
+# Manual PodGroup with Explicit Control
+#
+# This example shows how to manually create a PodGroup and link pods to it.
+# Useful when you need fine-grained control over gang scheduling behavior.
+#
+# Expected behavior:
+# - All 3 pods must be schedulable before any are scheduled
+# - Uses high-priority queue and Train priority class
+#
+---
+apiVersion: scheduling.kai.run/v1alpha2
+kind: PodGroup
+metadata:
+  name: my-training-job
+  namespace: default
+spec:
+  minMember: 3              # Must schedule all 3 together
+  queue: default            # Use default queue (or specify high-priority)
+  priorityClassName: Train  # Training workload priority
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: worker-1
+  namespace: default
+  labels:
+    kai.scheduler/podgroup: my-training-job  # Link to PodGroup
+    app: manual-gang-example
+  annotations:
+    gpu-memory: "16000"  # 16GB VRAM per pod
+spec:
+  schedulerName: kai-scheduler
+  restartPolicy: Never
+  containers:
+  - name: worker
+    image: pytorch/pytorch:latest
+    command: ["python", "-c", "import torch; import time; print('Worker 1 started'); time.sleep(3600)"]
+    resources:
+      requests:
+        nvidia.com/gpu: 1
+      limits:
+        nvidia.com/gpu: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: worker-2
+  namespace: default
+  labels:
+    kai.scheduler/podgroup: my-training-job
+    app: manual-gang-example
+  annotations:
+    gpu-memory: "16000"
+spec:
+  schedulerName: kai-scheduler
+  restartPolicy: Never
+  containers:
+  - name: worker
+    image: pytorch/pytorch:latest
+    command: ["python", "-c", "import torch; import time; print('Worker 2 started'); time.sleep(3600)"]
+    resources:
+      requests:
+        nvidia.com/gpu: 1
+      limits:
+        nvidia.com/gpu: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: worker-3
+  namespace: default
+  labels:
+    kai.scheduler/podgroup: my-training-job
+    app: manual-gang-example
+  annotations:
+    gpu-memory: "16000"
+spec:
+  schedulerName: kai-scheduler
+  restartPolicy: Never
+  containers:
+  - name: worker
+    image: pytorch/pytorch:latest
+    command: ["python", "-c", "import torch; import time; print('Worker 3 started'); time.sleep(3600)"]
+    resources:
+      requests:
+        nvidia.com/gpu: 1
+      limits:
+        nvidia.com/gpu: 1

@@ -1,0 +1,43 @@
+# Testing Gang Scheduling Behavior
+#
+# This example creates a job that requests MORE resources than typically available.
+# Use this to observe gang scheduling preventing partial allocation.
+#
+# Expected behavior on a 32GB GPU node:
+# - Without gang scheduling: 1 pod would start, others wait
+# - With gang scheduling: NO pods start (can't fit all 5 × 20GB = 100GB)
+# - All pods remain in Pending state
+# - PodGroup shows unschedulable explanation
+#
+# To test:
+# 1. Apply this file: kubectl apply -f large-gang-job.yaml
+# 2. Check pods: kubectl get pods -l app=large-gang-job
+# 3. Check PodGroup: kubectl describe podgroup large-gang-job
+# 4. Observe: All pods stay Pending (gang scheduling working!)
+#
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: large-gang-job
+  namespace: default
+spec:
+  completions: 5
+  parallelism: 5  # Requires 5 pods to start together
+  template:
+    metadata:
+      labels:
+        app: large-gang-job
+      annotations:
+        gpu-memory: "20000"  # 20GB per pod = 100GB total required
+    spec:
+      schedulerName: kai-scheduler
+      restartPolicy: Never
+      containers:
+      - name: worker
+        image: ubuntu
+        command: ["sleep", "3600"]
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+          limits:
+            nvidia.com/gpu: 1

@@ -1,0 +1,37 @@
+# Automatic Gang Scheduling with Kubernetes Job
+#
+# This example creates 3 worker pods that must all be scheduled together.
+# The pod-grouper automatically creates a PodGroup with minMember=3.
+#
+# Expected behavior:
+# - All 3 pods are scheduled simultaneously (or none are scheduled)
+# - Suitable for distributed training jobs
+#
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: distributed-training
+  namespace: default
+  labels:
+    kai.scheduler/queue: default  # Optional: specify queue
+spec:
+  completions: 3
+  parallelism: 3  # This becomes minMember in the auto-created PodGroup
+  template:
+    metadata:
+      labels:
+        app: distributed-training
+      annotations:
+        gpu-memory: "8000"  # Request 8GB VRAM per pod
+    spec:
+      schedulerName: kai-scheduler
+      restartPolicy: Never
+      containers:
+      - name: worker
+        image: pytorch/pytorch:latest
+        command: ["python", "-c", "import torch; import time; print(f'Worker started with {torch.cuda.device_count()} GPUs'); time.sleep(3600)"]
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+          limits:
+            nvidia.com/gpu: 1
