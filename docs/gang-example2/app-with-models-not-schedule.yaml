@@ -1,0 +1,103 @@
+# App with Dependent Model Pods
+#
+# This example demonstrates a real-world scenario where an application pod
+# depends on two model serving pods. All three must start together.
+#
+# Use case: An inference application that needs two ML models to be loaded
+# and ready before it can start serving requests.
+#
+# Expected behavior:
+# - All 3 pods (1 app + 2 models) are scheduled simultaneously
+# - If resources for all 3 aren't available, none will start
+#
+---
+apiVersion: scheduling.run.ai/v2alpha2
+kind: PodGroup
+metadata:
+  name: app-with-models
+  namespace: default
+spec:
+  minMember: 3                    # All 3 pods must be scheduled together
+  queue: test
+  priorityClassName: inference    # Inference workload priority (lowercase)
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-server
+  namespace: default
+  labels:
+    kai.scheduler/podgroup: app-with-models
+    role: application
+    app: awm
+  annotations:
+    pod-group-name: app-with-models  # Link to manual PodGroup
+spec:
+  schedulerName: kai-scheduler
+  restartPolicy: Never
+  containers:
+  - name: app
+    image: nginx:latest  # Replace with your app image
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "Application server starting..."
+        echo "Waiting for model-1 and model-2 to be ready..."
+        # In real scenario, app would connect to model services here
+        sleep infinity
+    ports:
+    - containerPort: 8080
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: model-1
+  namespace: default
+  labels:
+    kai.scheduler/podgroup: app-with-models
+    role: model
+    app: awm
+  annotations:
+    pod-group-name: app-with-models  # Link to manual PodGroup
+    gpu-memory: "16000"  # 16GB for first model
+spec:
+  schedulerName: kai-scheduler
+  restartPolicy: Never
+  containers:
+  - name: model
+    image: pytorch/pytorch:latest
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "Model 1 loading..."
+        python -c "import torch; print(f'Model 1 ready on GPU: {torch.cuda.is_available()}')"
+        sleep infinity
+    ports:
+    - containerPort: 5000
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: model-2
+  namespace: default
+  labels:
+    kai.scheduler/podgroup: app-with-models
+    role: model
+    app: awm
+  annotations:
+    pod-group-name: app-with-models  # Link to manual PodGroup
+    gpu-memory: "18000"  # 17GB for second model
+spec:
+  schedulerName: kai-scheduler
+  restartPolicy: Never
+  containers:
+  - name: model
+    image: pytorch/pytorch:latest
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "Model 2 loading..."
+        python -c "import torch; print(f'Model 2 ready on GPU: {torch.cuda.is_available()}')"
+        sleep infinity
+    ports:
+    - containerPort: 5001
