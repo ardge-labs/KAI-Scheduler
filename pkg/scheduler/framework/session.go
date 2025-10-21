@@ -174,16 +174,30 @@ func (ssn *Session) FittingGPUs(node *node_info.NodeInfo, pod *pod_info.PodInfo)
 
 func filterGpusByEnoughResources(node *node_info.NodeInfo, pod *pod_info.PodInfo) []string {
 	filteredGPUs := []string{}
+	log.InfraLogger.V(4).Infof("[GPU_FILTER] Node <%s>: Filtering GPUs for pod <%s/%s>, requested gpu-memory: <%d MB>",
+		node.Name, pod.Namespace, pod.Name, pod.ResReq.GpuMemory())
+
 	for gpuIdx := range node.UsedSharedGPUsMemory {
-		if node.IsTaskFitOnGpuGroup(pod.ResReq, gpuIdx) {
+		fits := node.IsTaskFitOnGpuGroup(pod.ResReq, gpuIdx)
+		log.InfraLogger.V(4).Infof("[GPU_FILTER] Node <%s>, GPU <%s>: UsedMemory=<%d MB>, AllocatedMemory=<%d MB>, ReleasingMemory=<%d MB>, TotalGpuMemory=<%d MB>, Fits=<%v>",
+			node.Name, gpuIdx,
+			node.UsedSharedGPUsMemory[gpuIdx],
+			node.AllocatedSharedGPUsMemory[gpuIdx],
+			node.ReleasingSharedGPUsMemory[gpuIdx],
+			node.MemoryOfEveryGpuOnNode,
+			fits)
+		if fits {
 			filteredGPUs = append(filteredGPUs, gpuIdx)
 		}
 	}
 	if node.Idle.GPUs() > 0 || node.Releasing.GPUs() > 0 {
+		log.InfraLogger.V(4).Infof("[GPU_FILTER] Node <%s>: IdleGPUs=<%v>, ReleasingGPUs=<%v>, adding <%d> whole GPU indicators",
+			node.Name, node.Idle.GPUs(), node.Releasing.GPUs(), int(node.Idle.GPUs())+int(node.Releasing.GPUs()))
 		for range int(node.Idle.GPUs()) + int(node.Releasing.GPUs()) {
 			filteredGPUs = append(filteredGPUs, pod_info.WholeGpuIndicator)
 		}
 	}
+	log.InfraLogger.V(4).Infof("[GPU_FILTER] Node <%s>: Filtered GPUs result: <%v>", node.Name, filteredGPUs)
 	return filteredGPUs
 }
 
