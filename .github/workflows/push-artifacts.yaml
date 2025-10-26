@@ -66,7 +66,11 @@ jobs:
       - name: Docker build & push (with version tag)
         run: make build DOCKER_BUILD_PLATFORM=linux/amd64,linux/arm64 DOCKER_REPO_BASE=${{ env.DOCKER_REGISTRY }} VERSION=$PACKAGE_VERSION DOCKER_BUILDX_ADDITIONAL_ARGS=--push
 
-      - name: Docker build & push (with dev tag)
+      - name: Docker build & push (with dev tag for branch push)
+        if: startsWith(github.ref, 'refs/heads/dev')
+        run: make build DOCKER_BUILD_PLATFORM=linux/amd64,linux/arm64 DOCKER_REPO_BASE=${{ env.DOCKER_REGISTRY }} VERSION=dev DOCKER_BUILDX_ADDITIONAL_ARGS=--push
+
+      - name: Docker build & push (with dev tag for tagged release)
         if: startsWith(github.ref, 'refs/tags/') && steps.tag_branch.outputs.BRANCH == 'dev'
         run: make build DOCKER_BUILD_PLATFORM=linux/amd64,linux/arm64 DOCKER_REPO_BASE=${{ env.DOCKER_REGISTRY }} VERSION=dev DOCKER_BUILDX_ADDITIONAL_ARGS=--push
 
@@ -83,7 +87,13 @@ jobs:
         run: |
           helm push ./charts/kai-scheduler-$PACKAGE_VERSION.tgz oci://${{ env.DOCKER_REGISTRY }}
 
-      - name: Build and Push Helm Chart (with dev tag)
+      - name: Build and Push Helm Chart (with dev tag for branch push)
+        if: startsWith(github.ref, 'refs/heads/dev')
+        run: |
+          helm package ./deployments/kai-scheduler -d ./charts --app-version dev --version dev
+          helm push ./charts/kai-scheduler-dev.tgz oci://${{ env.DOCKER_REGISTRY }}
+
+      - name: Build and Push Helm Chart (with dev tag for tagged release)
         if: startsWith(github.ref, 'refs/tags/') && steps.tag_branch.outputs.BRANCH == 'dev'
         run: |
           helm package ./deployments/kai-scheduler -d ./charts --app-version dev --version dev
