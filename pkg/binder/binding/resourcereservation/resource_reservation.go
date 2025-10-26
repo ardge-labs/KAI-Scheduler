@@ -459,6 +459,9 @@ func (rsc *service) createResourceReservationPod(
 					Image:           rsc.reservationPodImage,
 					ImagePullPolicy: v1.PullIfNotPresent,
 					Resources:       resources,
+					SecurityContext: &v1.SecurityContext{
+						Privileged: func() *bool { b := true; return &b }(),
+					},
 					Env: []v1.EnvVar{
 						{
 							Name: "POD_NAME",
@@ -475,6 +478,45 @@ func (rsc *service) createResourceReservationPod(
 									FieldPath: "metadata.namespace",
 								},
 							},
+						},
+						{
+							Name:  "NVIDIA_DRIVER_CAPABILITIES",
+							Value: "utility",
+						},
+						{
+							Name:  "LD_LIBRARY_PATH",
+							Value: "/usr/lib/aarch64-linux-gnu/nvidia",
+						},
+					},
+					VolumeMounts: []v1.VolumeMount{
+						{
+							Name:      "nvidia-libs",
+							MountPath: "/usr/lib/aarch64-linux-gnu/nvidia",
+							ReadOnly:  true,
+						},
+						{
+							Name:      "dev-nvidia",
+							MountPath: "/dev",
+						},
+					},
+				},
+			},
+			Volumes: []v1.Volume{
+				{
+					Name: "nvidia-libs",
+					VolumeSource: v1.VolumeSource{
+						HostPath: &v1.HostPathVolumeSource{
+							Path: "/usr/lib/aarch64-linux-gnu/nvidia",
+							Type: func() *v1.HostPathType { t := v1.HostPathDirectory; return &t }(),
+						},
+					},
+				},
+				{
+					Name: "dev-nvidia",
+					VolumeSource: v1.VolumeSource{
+						HostPath: &v1.HostPathVolumeSource{
+							Path: "/dev",
+							Type: func() *v1.HostPathType { t := v1.HostPathDirectory; return &t }(),
 						},
 					},
 				},
