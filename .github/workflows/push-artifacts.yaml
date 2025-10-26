@@ -54,14 +54,43 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Docker build & push
+      - name: Determine branch for tag
+        if: startsWith(github.ref, 'refs/tags/')
+        id: tag_branch
+        run: |
+          # Get the branch that contains this tag
+          BRANCH=$(git branch -r --contains ${{ github.ref_name }} | grep -v HEAD | head -1 | sed 's/.*\///')
+          echo "BRANCH=$BRANCH" >> $GITHUB_OUTPUT
+          echo "Tag ${{ github.ref_name }} is on branch: $BRANCH"
+
+      - name: Docker build & push (with version tag)
         run: make build DOCKER_BUILD_PLATFORM=linux/amd64,linux/arm64 DOCKER_REPO_BASE=${{ env.DOCKER_REGISTRY }} VERSION=$PACKAGE_VERSION DOCKER_BUILDX_ADDITIONAL_ARGS=--push
+
+      - name: Docker build & push (with dev tag)
+        if: startsWith(github.ref, 'refs/tags/') && steps.tag_branch.outputs.BRANCH == 'dev'
+        run: make build DOCKER_BUILD_PLATFORM=linux/amd64,linux/arm64 DOCKER_REPO_BASE=${{ env.DOCKER_REGISTRY }} VERSION=dev DOCKER_BUILDX_ADDITIONAL_ARGS=--push
+
+      - name: Docker build & push (with latest tag)
+        if: startsWith(github.ref, 'refs/tags/') && steps.tag_branch.outputs.BRANCH != 'dev'
+        run: make build DOCKER_BUILD_PLATFORM=linux/amd64,linux/arm64 DOCKER_REPO_BASE=${{ env.DOCKER_REGISTRY }} VERSION=latest DOCKER_BUILDX_ADDITIONAL_ARGS=--push
 
       - name: Build helm chart
         run: |
           sed -i 's#registry/local/kai-scheduler#${{ env.DOCKER_REGISTRY }}#' deployments/kai-scheduler/values.yaml
           helm package ./deployments/kai-scheduler -d ./charts --app-version $PACKAGE_VERSION --version $PACKAGE_VERSION
 
-      - name: Push Helm Chart
+      - name: Push Helm Chart (with version tag)
         run: |
           helm push ./charts/kai-scheduler-$PACKAGE_VERSION.tgz oci://${{ env.DOCKER_REGISTRY }}
+
+      - name: Build and Push Helm Chart (with dev tag)
+        if: startsWith(github.ref, 'refs/tags/') && steps.tag_branch.outputs.BRANCH == 'dev'
+        run: |
+          helm package ./deployments/kai-scheduler -d ./charts --app-version dev --version dev
+          helm push ./charts/kai-scheduler-dev.tgz oci://${{ env.DOCKER_REGISTRY }}
+
+      - name: Build and Push Helm Chart (with latest tag)
+        if: startsWith(github.ref, 'refs/tags/') && steps.tag_branch.outputs.BRANCH != 'dev'
+        run: |
+          helm package ./deployments/kai-scheduler -d ./charts --app-version latest --version latest
+          helm push ./charts/kai-scheduler-latest.tgz oci://${{ env.DOCKER_REGISTRY }}
