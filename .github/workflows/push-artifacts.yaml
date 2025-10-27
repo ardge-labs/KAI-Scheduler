@@ -91,16 +91,16 @@ jobs:
         if: startsWith(github.ref, 'refs/heads/dev')
         run: |
           helm package ./deployments/kai-scheduler -d ./charts --app-version 0.0.0-dev --version 0.0.0-dev
-          helm push ./charts/kai-scheduler-dev.tgz oci://${{ env.DOCKER_REGISTRY }}
+          helm push ./charts/kai-scheduler-0.0.0-dev.tgz oci://${{ env.DOCKER_REGISTRY }}
 
       - name: Build and Push Helm Chart (with dev tag for tagged release)
         if: startsWith(github.ref, 'refs/tags/') && steps.tag_branch.outputs.BRANCH == 'dev'
         run: |
           helm package ./deployments/kai-scheduler -d ./charts --app-version 0.0.0-dev --version 0.0.0-dev
-          helm push ./charts/kai-scheduler-dev.tgz oci://${{ env.DOCKER_REGISTRY }}
+          helm push ./charts/kai-scheduler-0.0.0-dev.tgz oci://${{ env.DOCKER_REGISTRY }}
 
       - name: Build and Push Helm Chart (with latest tag)
         if: startsWith(github.ref, 'refs/tags/') && steps.tag_branch.outputs.BRANCH != 'dev'
         run: |
           helm package ./deployments/kai-scheduler -d ./charts --app-version 0.0.0-latest --version 0.0.0-latest
-          helm push ./charts/kai-scheduler-latest.tgz oci://${{ env.DOCKER_REGISTRY }}
+          helm push ./charts/kai-scheduler-0.0.0-latest.tgz oci://${{ env.DOCKER_REGISTRY }}
